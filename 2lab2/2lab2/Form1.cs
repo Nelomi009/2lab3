@@ -27,5 +27,12 @@ namespace _2lab2 {
       task1Form.ShowDialog();
       this.Show();
     }
+
+    private void button2_Click(object sender, EventArgs e) {
+      this.Hide();
+      task2 task2Form = new task2();
+      task2Form.ShowDialog();
+      this.Show();
+    }
   }
   }
