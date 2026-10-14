@@ -7,18 +7,25 @@ using Label = System.Windows.Forms.Label;
 using MathFunction = System.Func<double, double>;
 
 namespace _2lab2 {
-  // Задание 2: поиск локального минимума методом дихотомии (половинного деления)
   public partial class task2 : Form {
-    private TextBox textBoxLeftBound;
-    private TextBox textBoxRightBound;
-    private TextBox textBoxPrecision;
-    private TextBox textBoxFormula;
-    private Chart chartFunction;
-    private Label labelResult;
+    private readonly MathSolver _solver = new MathSolver();
+
+    // Храним последнюю найденную точку и значение функции для отображения на графике
+    private double? _lastRootX = null;
+    private double? _lastRootY = null;
+
+    // Элементы управления (названия как на фото, но txtE — TextBox для вещественного числа по методичке)
+    private TextBox txtA;
+    private TextBox txtB;
+    private TextBox txtE;
+    private TextBox txtFunc;
+    private Chart chart1;
+    private Label lblResult;
 
     public task2() {
       InitializeComponent();
       BuildUserInterface();
+      SetupChart();
     }
 
     // Обработчик, на который ссылается task2.Designer.cs
@@ -27,28 +34,37 @@ namespace _2lab2 {
     }
 
     private void BuildUserInterface() {
-      Text = "Задание 2 — Метод дихотомии";
+      Text = "Лабораторная работа №1 — Метод дихотомии";
       StartPosition = FormStartPosition.CenterScreen;
       ClientSize = new Size(900, 650);
       MinimumSize = new Size(700, 500);
 
-      // Меню (кнопки действий — только в MenuStrip)
+      // Меню (все кнопки действий размещены в MenuStrip согласно требованиям)
       MenuStrip mainMenu = new MenuStrip();
-      ToolStripMenuItem menuItemCalculate = new ToolStripMenuItem("Рассчитать");
-      ToolStripMenuItem menuItemClear = new ToolStripMenuItem("Очистить");
-      ToolStripMenuItem menuItemExit = new ToolStripMenuItem("Выход");
-      menuItemCalculate.Click += menuCalculate_Click;
-      menuItemClear.Click += menuClear_Click;
-      menuItemExit.Click += (sender, eventArgs) => Close();
-      mainMenu.Items.AddRange(new ToolStripItem[] { menuItemCalculate, menuItemClear, menuItemExit });
+      ToolStripMenuItem calculateToolStripMenuItem = new ToolStripMenuItem("Рассчитать");
+      ToolStripMenuItem plotGraphToolStripMenuItem = new ToolStripMenuItem("Построить график");
+      ToolStripMenuItem clearToolStripMenuItem = new ToolStripMenuItem("Очистить");
+      ToolStripMenuItem exitToolStripMenuItem = new ToolStripMenuItem("Выход");
+
+      calculateToolStripMenuItem.Click += calculateToolStripMenuItem_Click;
+      plotGraphToolStripMenuItem.Click += построитьГрафикToolStripMenuItem_Click;
+      clearToolStripMenuItem.Click += clearToolStripMenuItem_Click;
+      exitToolStripMenuItem.Click += (sender, e) => Close();
+
+      mainMenu.Items.AddRange(new ToolStripItem[] {
+        calculateToolStripMenuItem,
+        plotGraphToolStripMenuItem,
+        clearToolStripMenuItem,
+        exitToolStripMenuItem
+      });
       MainMenuStrip = mainMenu;
 
-      // Панель ввода
+      // Панель ввода (a, b, e — вещественные числа, f(x) — строка с формулой)
       Panel inputPanel = new Panel { Dock = DockStyle.Top, Height = 100 };
-      textBoxLeftBound = AddInputField(inputPanel, "a:", 15, 15, 90, "0");
-      textBoxRightBound = AddInputField(inputPanel, "b:", 165, 15, 90, "5");
-      textBoxPrecision = AddInputField(inputPanel, "e:", 315, 15, 90, "0,001");
-      textBoxFormula = AddInputField(inputPanel, "f(x):", 15, 55, 520, "x^2 - 4*x + 3");
+      txtA = AddInputField(inputPanel, "a:", 15, 15, 90, "0");
+      txtB = AddInputField(inputPanel, "b:", 165, 15, 90, "2,5");
+      txtE = AddInputField(inputPanel, "e:", 315, 15, 90, "0,001");
+      txtFunc = AddInputField(inputPanel, "f(x):", 15, 55, 520, "x^2 - 4*x + 3");
 
       Label labelHint = new Label {
         Text = "Допустимо: + - * / ^, скобки, x, pi, e,\nsin cos tan asin acos atan exp ln log sqrt abs",
@@ -58,30 +74,24 @@ namespace _2lab2 {
       };
       inputPanel.Controls.Add(labelHint);
 
-      // Результат
-      labelResult = new Label {
+      // Поле вывода результата
+      lblResult = new Label {
         Dock = DockStyle.Bottom,
         Height = 40,
         Font = new Font("Arial", 11f, FontStyle.Bold),
         ForeColor = Color.DarkGreen,
         TextAlign = ContentAlignment.MiddleLeft,
         Padding = new Padding(10, 0, 0, 0),
-        Text = "Результат: —"
+        Text = "Значение функции: —"
       };
 
       // График
-      chartFunction = new Chart { Dock = DockStyle.Fill };
-      ChartArea chartArea = new ChartArea("main");
-      chartArea.AxisX.MajorGrid.LineColor = Color.Gainsboro;
-      chartArea.AxisY.MajorGrid.LineColor = Color.Gainsboro;
-      chartArea.AxisX.LabelStyle.Format = "0.##";
-      chartArea.AxisY.LabelStyle.Format = "0.##";
-      chartFunction.ChartAreas.Add(chartArea);
-      chartFunction.Legends.Add(new Legend("legend") { Docking = Docking.Top });
+      chart1 = new Chart { Dock = DockStyle.Fill };
+      chart1.Legends.Add(new Legend("legend") { Docking = Docking.Top });
 
       // Порядок добавления важен для Dock: сначала Fill, затем остальные
-      Controls.Add(chartFunction);
-      Controls.Add(labelResult);
+      Controls.Add(chart1);
+      Controls.Add(lblResult);
       Controls.Add(inputPanel);
       Controls.Add(mainMenu);
     }
@@ -99,119 +109,161 @@ namespace _2lab2 {
       return textBox;
     }
 
-    private void menuCalculate_Click(object sender, EventArgs eventArgs) {
-      // 1. Валидация входных данных
-      if (!TryParseDouble(textBoxLeftBound.Text, out double leftBound)) { ShowWarning("Параметр a должен быть вещественным числом.", textBoxLeftBound); return; }
-      if (!TryParseDouble(textBoxRightBound.Text, out double rightBound)) { ShowWarning("Параметр b должен быть вещественным числом.", textBoxRightBound); return; }
-      if (!TryParseDouble(textBoxPrecision.Text, out double precision)) { ShowWarning("Параметр e должен быть вещественным числом.", textBoxPrecision); return; }
-      if (leftBound >= rightBound) { ShowWarning("Должно выполняться a < b.", textBoxLeftBound); return; }
-      if (precision <= 0) { ShowWarning("Точность e должна быть больше нуля.", textBoxPrecision); return; }
-      if (string.IsNullOrWhiteSpace(textBoxFormula.Text)) { ShowWarning("Введите формулу f(x).", textBoxFormula); return; }
+    // =========================================================================
+    // БЛОК 1: НАСТРОЙКА ГРАФИКА (при старте)
+    // =========================================================================
+    private void SetupChart() {
+      chart1.Series.Clear();
+      chart1.ChartAreas.Clear();
+      chart1.ChartAreas.Add("Area1");
 
-      MathFunction function;
-      try {
-        function = FormulaParser.Compile(textBoxFormula.Text);
-      }
-      catch (FormatException formulaError) {
-        ShowWarning("Ошибка в формуле: " + formulaError.Message, textBoxFormula);
-        return;
-      }
-
-      // 2. Метод дихотомии
-      double intervalStart = leftBound;
-      double intervalEnd = rightBound;
-      double probeOffset = precision / 4.0;   // расстояние от середины до пробных точек
-      int iterationCount = 0;
-      const int maxIterations = 200;
-
-      try {
-        while ((intervalEnd - intervalStart) / 2.0 > precision) {
-          iterationCount++;
-          if (iterationCount > maxIterations) {
-            ShowWarning("Не удалось достичь заданной точности: значение e слишком мало для этого интервала.", textBoxPrecision);
-            return;
-          }
-
-          double middle = (intervalStart + intervalEnd) / 2.0;
-          double leftProbe = middle - probeOffset;
-          double rightProbe = middle + probeOffset;
-          double leftValue = EvaluateOrThrow(function, leftProbe);
-          double rightValue = EvaluateOrThrow(function, rightProbe);
-
-          if (leftValue < rightValue) intervalEnd = rightProbe;
-          else intervalStart = leftProbe;
-        }
-
-        double minimumX = (intervalStart + intervalEnd) / 2.0;
-        double minimumValue = EvaluateOrThrow(function, minimumX);
-
-        // 3. Вывод результата и графика
-        int decimalPlaces = Math.Min(12, Math.Max(2, (int)Math.Ceiling(-Math.Log10(precision)) + 1));
-        string numberFormat = "F" + decimalPlaces;
-        labelResult.Text = $"Минимум: x = {minimumX.ToString(numberFormat)},  f(x) = {minimumValue.ToString(numberFormat)}  (итераций: {iterationCount})";
-
-        DrawChart(function, leftBound, rightBound, minimumX, minimumValue);
-      }
-      catch (InvalidOperationException domainError) {
-        ShowWarning(domainError.Message, textBoxFormula);
-      }
-    }
-
-    private void menuClear_Click(object sender, EventArgs eventArgs) {
-      textBoxLeftBound.Clear();
-      textBoxRightBound.Clear();
-      textBoxPrecision.Clear();
-      textBoxFormula.Clear();
-      chartFunction.Series.Clear();
-      labelResult.Text = "Результат: —";
-      textBoxLeftBound.Focus();
-    }
-
-    private static double EvaluateOrThrow(MathFunction function, double xValue) {
-      double result = function(xValue);
-      if (double.IsNaN(result) || double.IsInfinity(result))
-        throw new InvalidOperationException(
-          $"Функция не определена в точке x = {xValue.ToString("G6", CultureInfo.CurrentCulture)}. Выберите другой интервал.");
-      return result;
-    }
-
-    private void DrawChart(MathFunction function, double leftBound, double rightBound, double minimumX, double minimumValue) {
-      chartFunction.Series.Clear();
-
-      Series curveSeries = new Series("f(x)") {
+      // Линия функции
+      Series seriesFunc = new Series("Function") {
         ChartType = SeriesChartType.Line,
-        ChartArea = "main",
-        Legend = "legend",
-        Color = Color.SteelBlue,
-        BorderWidth = 2
+        BorderWidth = 3,
+        Color = Color.Blue,
+        LegendText = "f(x)"
       };
+      chart1.Series.Add(seriesFunc);
 
-      const int pointCount = 500;
-      for (int pointIndex = 0; pointIndex <= pointCount; pointIndex++) {
-        double xValue = leftBound + (rightBound - leftBound) * pointIndex / pointCount;
-        double yValue = function(xValue);
-        if (double.IsNaN(yValue) || double.IsInfinity(yValue)) continue; // точки разрыва пропускаем
-        curveSeries.Points.AddXY(xValue, yValue);
-      }
-
-      Series minimumSeries = new Series("Минимум") {
+      // Найденная точка на графике
+      Series seriesRoot = new Series("RootPoint") {
         ChartType = SeriesChartType.Point,
-        ChartArea = "main",
-        Legend = "legend",
-        Color = Color.Red,
+        MarkerSize = 12,
         MarkerStyle = MarkerStyle.Circle,
-        MarkerSize = 11
+        Color = Color.Red,
+        LegendText = "Найденное значение"
       };
-      minimumSeries.Points.AddXY(minimumX, minimumValue);
+      chart1.Series.Add(seriesRoot);
 
-      chartFunction.Series.Add(curveSeries);
-      chartFunction.Series.Add(minimumSeries);
-
-      chartFunction.ChartAreas["main"].AxisX.Minimum = leftBound;
-      chartFunction.ChartAreas["main"].AxisX.Maximum = rightBound;
-      chartFunction.ChartAreas["main"].RecalculateAxesScale();
+      // Оси пересекаются в (0, 0)
+      chart1.ChartAreas[0].AxisX.Crossing = 0;
+      chart1.ChartAreas[0].AxisY.Crossing = 0;
+      chart1.ChartAreas[0].AxisX.MajorGrid.LineColor = Color.Gainsboro;
+      chart1.ChartAreas[0].AxisY.MajorGrid.LineColor = Color.Gainsboro;
+      chart1.ChartAreas[0].AxisX.LabelStyle.Format = "0.##";
+      chart1.ChartAreas[0].AxisY.LabelStyle.Format = "0.##";
     }
 
+    // =========================================================================
+    // БЛОК 2: РАССЧИТАТЬ (только считает, не рисует!)
+    // =========================================================================
+    private void calculateToolStripMenuItem_Click(object sender, EventArgs e) {
+      try {
+        // Валидация входных данных (a, b, e — вещественные числа)
+        if (!TryParseDouble(txtA.Text, out double a))
+          throw new Exception("Параметр 'a' должен быть вещественным числом.");
+        if (!TryParseDouble(txtB.Text, out double b))
+          throw new Exception("Параметр 'b' должен быть вещественным числом.");
+        if (!TryParseDouble(txtE.Text, out double eps))
+          throw new Exception("Параметр 'e' должен быть вещественным числом.");
+        if (a >= b)
+          throw new Exception("Интервал задан неверно: 'a' должно быть меньше 'b'.");
+        if (eps <= 0)
+          throw new Exception("Точность 'e' должна быть больше нуля.");
+
+        string funcStr = txtFunc.Text;
+        if (string.IsNullOrWhiteSpace(funcStr))
+          throw new Exception("Введите формулу функции f(x).");
+
+        // Считаем методом дихотомии
+        var result = _solver.FindRoot(funcStr, a, b, eps);
+
+        // Сохраняем координаты для графика
+        _lastRootX = result.Root;
+        _lastRootY = result.RootValue;
+
+        // Вычисляем количество знаков после запятой из введённого вещественного e
+        int precisionDigits = Math.Min(12, Math.Max(2, (int)Math.Ceiling(-Math.Log10(eps))));
+        string format = "F" + (precisionDigits + 2);
+
+        // Выводим и найденное значение функции f(x), и точку x
+        lblResult.Text = $"Значение функции: f(x) = {result.RootValue.ToString(format)}   (при x = {result.Root.ToString(format)})";
+      }
+      catch (Exception ex) {
+        MessageBox.Show(ex.Message, "Ошибка расчёта",
+          MessageBoxButtons.OK, MessageBoxIcon.Warning);
+      }
+    }
+
+    // =========================================================================
+    // БЛОК 3: ПОСТРОИТЬ ГРАФИК (только рисует, не считает!)
+    // =========================================================================
+    private void построитьГрафикToolStripMenuItem_Click(object sender, EventArgs e) {
+      try {
+        // Валидация
+        if (!TryParseDouble(txtA.Text, out double a))
+          throw new Exception("Параметр 'a' должен быть вещественным числом.");
+        if (!TryParseDouble(txtB.Text, out double b))
+          throw new Exception("Параметр 'b' должен быть вещественным числом.");
+        if (a >= b)
+          throw new Exception("Интервал задан неверно: 'a' должно быть меньше 'b'.");
+
+        string funcStr = txtFunc.Text;
+        if (string.IsNullOrWhiteSpace(funcStr))
+          throw new Exception("Введите формулу функции f(x).");
+
+        // Рисуем
+        PlotGraph(funcStr, a, b);
+      }
+      catch (Exception ex) {
+        MessageBox.Show(ex.Message, "Ошибка отрисовки",
+          MessageBoxButtons.OK, MessageBoxIcon.Warning);
+      }
+    }
+
+    // =========================================================================
+    // ОТРИСОВКА ГРАФИКА (вызывается из "Построить график")
+    // =========================================================================
+    private void PlotGraph(string funcStr, double a, double b) {
+      chart1.Series["Function"].Points.Clear();
+      chart1.Series["RootPoint"].Points.Clear();
+
+      // Расширяем диапазон, чтобы был виден контекст
+      double delta = (b - a) * 0.3;
+      double minX = a - delta;
+      double maxX = b + delta;
+
+      if (Math.Abs(maxX - minX) < 0.1) { minX -= 1; maxX += 1; }
+
+      double step = (maxX - minX) / 500;
+      const double yLimit = 1e6;
+
+      for (double x = minX; x <= maxX; x += step) {
+        try {
+          double y = _solver.CalculateFunction(funcStr, x);
+          if (double.IsNaN(y) || double.IsInfinity(y) || Math.Abs(y) > yLimit)
+            continue;
+          chart1.Series["Function"].Points.AddXY(x, y);
+        }
+        catch { }
+      }
+
+      // Если точка была найдена ранее — отмечаем её на графике
+      if (_lastRootX.HasValue && _lastRootY.HasValue) {
+        chart1.Series["RootPoint"].Points.AddXY(_lastRootX.Value, _lastRootY.Value);
+      }
+
+      chart1.ChartAreas[0].RecalculateAxesScale();
+    }
+
+    // =========================================================================
+    // БЛОК 4: ОЧИСТИТЬ
+    // =========================================================================
+    private void clearToolStripMenuItem_Click(object sender, EventArgs e) {
+      txtA.Clear();
+      txtB.Clear();
+      txtE.Clear();
+      txtFunc.Clear();
+      _lastRootX = null;
+      _lastRootY = null;
+
+      lblResult.Text = "Значение функции: —";
+      chart1.Series["Function"].Points.Clear();
+      chart1.Series["RootPoint"].Points.Clear();
+    }
+
+    // Поддержка ввода вещественных чисел как через запятую, так и через точку
     private static bool TryParseDouble(string text, out double number) {
       number = 0;
       if (string.IsNullOrWhiteSpace(text)) return false;
@@ -219,15 +271,83 @@ namespace _2lab2 {
       if (!double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out number)) return false;
       return !double.IsNaN(number) && !double.IsInfinity(number);
     }
+  }
 
-    private void ShowWarning(string message, Control fieldToFocus) {
-      MessageBox.Show(message, "Некорректные данные", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-      fieldToFocus?.Focus();
+  // ---------- КЛАСС РЕШАТЕЛЯ (MathSolver со скриншотов) ----------
+  public class RootResult {
+    public double Root { get; set; }
+    public double RootValue { get; set; }
+  }
+
+  public class MathSolver {
+    public double CalculateFunction(string funcStr, double x) {
+      MathFunction fn = FormulaParser.Compile(funcStr);
+      return fn(x);
+    }
+
+    // Метод дихотомии (половинного деления) на интервале [a, b] с точностью eps
+    public RootResult FindRoot(string funcStr, double a, double b, double eps) {
+      MathFunction fn;
+      try {
+        fn = FormulaParser.Compile(funcStr);
+      }
+      catch (FormatException ex) {
+        throw new Exception("Ошибка в формуле: " + ex.Message);
+      }
+
+      double fa = EvaluateOrThrow(fn, a);
+      double fb = EvaluateOrThrow(fn, b);
+
+      if (Math.Abs(fa) <= eps) return new RootResult { Root = a, RootValue = fa };
+      if (Math.Abs(fb) <= eps) return new RootResult { Root = b, RootValue = fb };
+
+      if (fa * fb > 0) {
+        throw new Exception("На концах отрезка [a; b] функция должна иметь разные знаки (f(a) * f(b) < 0).");
+      }
+
+      double left = a;
+      double right = b;
+      int iterations = 0;
+      const int maxIterations = 1000;
+
+      while ((right - left) / 2.0 > eps) {
+        iterations++;
+        if (iterations > maxIterations) {
+          throw new Exception("Не удалось достичь заданной точности: значение 'e' слишком мало для этого интервала.");
+        }
+
+        double mid = (left + right) / 2.0;
+        double fmid = EvaluateOrThrow(fn, mid);
+
+        if (Math.Abs(fmid) <= eps) {
+          left = right = mid;
+          break;
+        }
+
+        if (fa * fmid < 0) {
+          right = mid;
+          fb = fmid;
+        }
+        else {
+          left = mid;
+          fa = fmid;
+        }
+      }
+
+      double root = (left + right) / 2.0;
+      double rootVal = EvaluateOrThrow(fn, root);
+      return new RootResult { Root = root, RootValue = rootVal };
+    }
+
+    private static double EvaluateOrThrow(MathFunction fn, double x) {
+      double y = fn(x);
+      if (double.IsNaN(y) || double.IsInfinity(y))
+        throw new Exception($"Функция не определена в точке x = {x:G6}. Выберите другой интервал.");
+      return y;
     }
   }
 
   // ---------- РАЗБОР ФОРМУЛЫ ----------
-  // Превращает строку вида "x^2 - 4*sin(x)" в функцию double -> double
   internal static class FormulaParser {
     public static MathFunction Compile(string formulaText) {
       return new Parser(formulaText).ParseAll();
@@ -253,7 +373,6 @@ namespace _2lab2 {
         while (position < formulaText.Length && char.IsWhiteSpace(formulaText[position])) position++;
       }
 
-      // Если дальше стоит ожидаемый символ — съедает его и возвращает true
       private bool TryConsume(char expectedChar) {
         SkipWhitespace();
         if (position < formulaText.Length && formulaText[position] == expectedChar) {
@@ -263,7 +382,6 @@ namespace _2lab2 {
         return false;
       }
 
-      // выражение: слагаемые через + и -
       private MathFunction ParseExpression() {
         MathFunction result = ParseTerm();
         while (true) {
@@ -281,7 +399,6 @@ namespace _2lab2 {
         }
       }
 
-      // слагаемое: множители через * и /
       private MathFunction ParseTerm() {
         MathFunction result = ParseUnary();
         while (true) {
@@ -299,7 +416,6 @@ namespace _2lab2 {
         }
       }
 
-      // унарный минус / плюс
       private MathFunction ParseUnary() {
         if (TryConsume('-')) {
           MathFunction operand = ParseUnary();
@@ -309,7 +425,6 @@ namespace _2lab2 {
         return ParsePower();
       }
 
-      // степень: основание ^ показатель (правоассоциативная)
       private MathFunction ParsePower() {
         MathFunction baseValue = ParsePrimary();
         if (TryConsume('^')) {
@@ -319,7 +434,6 @@ namespace _2lab2 {
         return baseValue;
       }
 
-      // число, переменная x, константа, скобки или вызов функции
       private MathFunction ParsePrimary() {
         SkipWhitespace();
         if (position >= formulaText.Length)
@@ -377,7 +491,6 @@ namespace _2lab2 {
                (char.IsDigit(formulaText[position]) || formulaText[position] == '.' || formulaText[position] == ','))
           position++;
 
-        // экспоненциальная запись: 1e-3
         if (position < formulaText.Length && (formulaText[position] == 'e' || formulaText[position] == 'E')) {
           int exponentEnd = position + 1;
           if (exponentEnd < formulaText.Length && (formulaText[exponentEnd] == '+' || formulaText[exponentEnd] == '-'))
